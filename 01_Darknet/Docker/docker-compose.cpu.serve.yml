@@ -1,0 +1,9 @@
+version: '3'
+services:
+   darknet:
+      stdin_open: true
+      tty: true
+      image: darknet-cpu:latest
+      command: ["serve"]
+      ports:
+         - "8080:8080"
