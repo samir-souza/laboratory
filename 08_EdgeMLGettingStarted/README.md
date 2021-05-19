@@ -7,4 +7,4 @@
 | Jetson Xavier   || [Tiny Yolov4 416x416 80 classes](models/02_YoloV4/01_Pytorch) | x | x |
 
 ## SageMaker Edge Manager Docker container
-[Instructions](sagemaker_edge_manager_agent_docker/README.me) of how to create a docker container for the ARM64 agent + Nvidia devices -> Nano/Xavier.
+[Instructions](sagemaker_edge_manager_agent_docker/README.md) of how to create a docker container for the ARM64 agent + Nvidia devices -> Nano/Xavier.
