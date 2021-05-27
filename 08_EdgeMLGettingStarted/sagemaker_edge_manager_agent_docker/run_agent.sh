@@ -1,6 +1,6 @@
 #!/bin/bash
 mkdir -p /tmp/sock_agent_0
-docker run -it --rm --net=host --ipc=host --runtime nvidia -e DISPLAY=$DISPLAY \
+docker run -it --rm --ipc=host --runtime nvidia -e DISPLAY=$DISPLAY \
 	-v /tmp/.X11-unix/:/tmp/.X11-unix \
 	-v $PWD/conf:/home/agent/conf \
 	-v $PWD/models:/home/agent/models \
