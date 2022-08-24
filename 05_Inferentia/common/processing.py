@@ -28,9 +28,12 @@ if os.path.exists(yolov5_path):
     if yolov5_path not in sys.path: sys.path.insert(0, yolov5_path)
     # imports from Yolov5 --> You need to install requirements.txt from
     # https://pytorch.org/hub/ultralytics_yolov5/
-    from utils.augmentations import letterbox
-    from utils.general import non_max_suppression, scale_coords
-    from utils.plots import Annotator, colors
+    try:
+        from utils.augmentations import letterbox
+        from utils.general import non_max_suppression, scale_coords
+        from utils.plots import Annotator, colors
+    except Exception as e:
+        pass
 
 def preprocess_coco(img, img_size=(640,640), disable_letterbox=False, keep_aspect=True):
     x = img
@@ -65,15 +68,16 @@ def postprocess_yolov5(predictions, raw_img, size=(640,640)):
         annotator.box_label(xyxy, label, color=colors(c, True))
     return cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
  
-def preprocess_imagenet(img, chw=True, mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225], img_size=(224,224)):
+def preprocess_imagenet(img, chw=True, mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225], img_size=(224,224), make_square=True):
     x = img.copy()
     h,w,c = x.shape
-    max_side = 0
-    if h!=w: # squared - make it square to avoid distortions
-        max_side = max(h,w)
-        new_img = np.zeros((max_side,max_side,c), dtype=np.uint8)
-        new_img[0:h, 0:w] = x[:]
-        x = new_img
+    if make_square:
+        max_side = 0
+        if h!=w: # squared - make it square to avoid distortions
+            max_side = max(h,w)
+            new_img = np.zeros((max_side,max_side,c), dtype=np.uint8)
+            new_img[0:h, 0:w] = x[:]
+            x = new_img
     x = cv2.cvtColor(x, cv2.COLOR_BGR2RGB)
     x = cv2.resize(x, img_size)
     x = (x / 255)
@@ -114,6 +118,12 @@ def load_sample_imgB():
     if not os.path.exists("zidane.jpg"):
         urllib.request.urlretrieve("https://ultralytics.com/images/zidane.jpg", "zidane.jpg")
     return cv2.imread("zidane.jpg")
+
+def load_sample_imgC():
+    if not os.path.exists("man_walking.jpg"):
+        urllib.request.urlretrieve("https://images.unsplash.com/photo-1611324204543-ecc01e953173", "man_walking.jpg")
+        #urllib.request.urlretrieve("https://raw.githubusercontent.com/samir-souza/laboratory/master/06_PoseEstimation/man_walking.jpg", "man_walking.jpg")
+    return cv2.imread("man_walking.jpg")
 
 def load_imagenet1k_labels():
     # Download the labels for Imagenet 1k
