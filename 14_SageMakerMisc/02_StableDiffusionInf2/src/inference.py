@@ -1,8 +1,10 @@
 # Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: MIT-0
 
-import io
 import os
+# set the envvar before importing torch_neuronx
+os.environ['NEURON_RT_NUM_CORES'] = '2'
+import io
 import time
 import torch
 import numpy as np
@@ -13,7 +15,7 @@ from wrapper import NeuronTextEncoder, UNetWrap, NeuronUNet
 from diffusers.models.cross_attention import CrossAttention
 from diffusers import StableDiffusionPipeline, DPMSolverMultistepScheduler
 
-device_ids = [0,1]
+
 model_id = "stabilityai/stable-diffusion-2-1-base"
 
 def model_fn(model_dir, context=None):
@@ -31,7 +33,7 @@ def model_fn(model_dir, context=None):
     
     # Load the compiled UNet onto two neuron cores.
     pipe.unet = NeuronUNet(UNetWrap(pipe.unet))
-    pipe.unet.unetwrap = torch_neuronx.DataParallel(torch.jit.load(unet_filename), device_ids, set_dynamic_batching=False)
+    pipe.unet.unetwrap = torch_neuronx.DataParallel(torch.jit.load(unet_filename), None, set_dynamic_batching=False)
 
     # Load other compiled models onto a single neuron core.
     pipe.text_encoder = NeuronTextEncoder(pipe.text_encoder)
