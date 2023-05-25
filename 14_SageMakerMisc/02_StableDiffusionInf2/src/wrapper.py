@@ -21,9 +21,10 @@ class NeuronUNet(nn.Module):
         self.config = unetwrap.unet.config
         self.in_channels = unetwrap.unet.in_channels
         self.device = unetwrap.unet.device
+        self.dtype = unetwrap.unet.dtype
 
     def forward(self, sample, timestep, encoder_hidden_states, cross_attention_kwargs=None):
-        sample = self.unetwrap(sample, timestep.float().expand((sample.shape[0],)), encoder_hidden_states)[0]
+        sample = self.unetwrap(sample, timestep.type(self.dtype).expand((sample.shape[0],)), encoder_hidden_states)[0]
         return UNet2DConditionOutput(sample=sample)
 
 class NeuronTextEncoder(nn.Module):

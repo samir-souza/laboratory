@@ -48,20 +48,20 @@ def compile_text_encoder(text_encoder, args):
 
     # delete unused objects
     del text_encoder
-    del text_encoder_neuron    
+    del text_encoder_neuron
     print(f"Done. Elapsed time: {(time.time()-t)*1000}ms")
 
-def compile_vae(decoder, args):
+def compile_vae(decoder, args, dtype):
     print("Compiling VAE...")
     base_dir='vae_decoder'
     os.makedirs(os.path.join(args.checkpoints_path, base_dir), exist_ok=True)
-    os.makedirs(os.path.join(args.model_path, base_dir), exist_ok=True)    
+    os.makedirs(os.path.join(args.model_path, base_dir), exist_ok=True)
     t = time.time()
     # Compile vae decoder
-    decoder_in = torch.randn([1, 4, 64, 64])
+    decoder_in = torch.randn([1, 4, 64, 64]).type(dtype)
     decoder_neuron = torch_neuronx.trace(
-        decoder, 
-        decoder_in, 
+        decoder,
+        decoder_in,
         #compiler_workdir=os.path.join(args.checkpoints_path, base_dir),
     )
 
@@ -73,17 +73,17 @@ def compile_vae(decoder, args):
     del decoder
     del decoder_neuron
     print(f"Done. Elapsed time: {(time.time()-t)*1000}ms")
-    
-def compile_unet(unet, args):
+
+def compile_unet(unet, args, dtype):
     print("Compiling U-Net...")
     base_dir='unet'
     os.makedirs(os.path.join(args.checkpoints_path, base_dir), exist_ok=True)
-    os.makedirs(os.path.join(args.model_path, base_dir), exist_ok=True)    
+    os.makedirs(os.path.join(args.model_path, base_dir), exist_ok=True)
     t = time.time()
-    # Compile unet - FP32
-    sample_1b = torch.randn([1, 4, 64, 64])
-    timestep_1b = torch.tensor(999).float().expand((1,))
-    encoder_hidden_states_1b = torch.randn([1, 77, 1024])
+    # Compile unet - BF16
+    sample_1b = torch.randn([1, 4, 64, 64]).type(dtype)
+    timestep_1b = torch.tensor(999).type(dtype).expand((1,))
+    encoder_hidden_states_1b = torch.randn([1, 77, 1024]).type(dtype)
     example_inputs = sample_1b, timestep_1b, encoder_hidden_states_1b
 
     unet_neuron = torch_neuronx.trace(
@@ -101,18 +101,18 @@ def compile_unet(unet, args):
     del unet
     del unet_neuron
     print(f"Done. Elapsed time: {(time.time()-t)*1000}ms")
-    
-def compile_vae_post_quant_conv(post_quant_conv, args):
+
+def compile_vae_post_quant_conv(post_quant_conv, args, dtype):
     print("Compiling Post Quant Conv...")
     base_dir='vae_post_quant_conv'
     os.makedirs(os.path.join(args.checkpoints_path, base_dir), exist_ok=True)
     os.makedirs(os.path.join(args.model_path, base_dir), exist_ok=True)
-    t = time.time()    
-    
+    t = time.time()
+
     # # Compile vae post_quant_conv
-    post_quant_conv_in = torch.randn([1, 4, 64, 64])
+    post_quant_conv_in = torch.randn([1, 4, 64, 64]).type(dtype)
     post_quant_conv_neuron = torch_neuronx.trace(
-        post_quant_conv, 
+        post_quant_conv,
         post_quant_conv_in,
         #compiler_workdir=os.path.join(args.checkpoints_path, base_dir),
     )
@@ -128,21 +128,23 @@ def compile_vae_post_quant_conv(post_quant_conv, args):
 
 if __name__=='__main__':
     parser = argparse.ArgumentParser(description='Train the UNet on images and target masks')
-    parser.add_argument('--model-path', type=str, help="Path where we'll save the model", default=os.environ["SM_MODEL_DIR"])    
+    parser.add_argument('--model-path', type=str, help="Path where we'll save the model", default=os.environ["SM_MODEL_DIR"])
     parser.add_argument('--checkpoints-path', type=str, help="Path where we'll save the best model and cache", default='/opt/ml/checkpoints')
-    
+    parser.add_argument('--dtype', type=str, choices=['bf16','fp32'], default='bf16', help="Datatype of the weights")
+
     args = parser.parse_args()
 
     # make sure the checkpoint path exists
     os.makedirs(args.checkpoints_path, exist_ok=True)
-    
+
     # Model ID for SD version pipeline
     model_id = "stabilityai/stable-diffusion-2-1-base"
 
     # --- Compile CLIP text encoder and save ---
 
+    dtype = torch.bfloat16 if args.dtype == 'bf16' else torch.float32
     # Only keep the model being compiled in RAM to minimze memory pressure
-    pipe = StableDiffusionPipeline.from_pretrained(model_id, torch_dtype=torch.float32)
+    pipe = StableDiffusionPipeline.from_pretrained(model_id, torch_dtype=dtype)
     text_encoder = copy.deepcopy(pipe.text_encoder)
     del pipe
     compile_text_encoder(text_encoder, args)
@@ -150,14 +152,14 @@ if __name__=='__main__':
     # --- Compile VAE decoder and save ---
 
     # Only keep the model being compiled in RAM to minimze memory pressure
-    pipe = StableDiffusionPipeline.from_pretrained(model_id, torch_dtype=torch.float32)
+    pipe = StableDiffusionPipeline.from_pretrained(model_id, torch_dtype=dtype)
     decoder = copy.deepcopy(pipe.vae.decoder)
     del pipe
-    compile_vae(decoder, args)
+    compile_vae(decoder, args, dtype)
 
     # --- Compile UNet and save ---
 
-    pipe = StableDiffusionPipeline.from_pretrained(model_id, torch_dtype=torch.float32)
+    pipe = StableDiffusionPipeline.from_pretrained(model_id, torch_dtype=dtype)
 
     # Replace original cross-attention module with custom cross-attention module for better performance
     CrossAttention.get_attention_scores = get_attention_scores
@@ -168,18 +170,26 @@ if __name__=='__main__':
     # Only keep the model being compiled in RAM to minimze memory pressure
     unet = copy.deepcopy(pipe.unet.unetwrap)
     del pipe
-    compile_unet(unet, args)
+    compile_unet(unet, args, dtype)
 
     # --- Compile VAE post_quant_conv and save ---
 
     # Only keep the model being compiled in RAM to minimze memory pressure
-    pipe = StableDiffusionPipeline.from_pretrained(model_id, torch_dtype=torch.float32)
+    pipe = StableDiffusionPipeline.from_pretrained(model_id, torch_dtype=dtype)
     post_quant_conv = copy.deepcopy(pipe.vae.post_quant_conv)
     del pipe
-    compile_vae_post_quant_conv(post_quant_conv, args)
-    
+    compile_vae_post_quant_conv(post_quant_conv, args, dtype)
+
     code_path = os.path.join(args.model_path, 'code')
     os.makedirs(code_path, exist_ok=True)
+    
+    # replace datatype
+    with open('inference.py', 'r') as f:
+        data = f.read()
+    data = data.replace('DTYPE_REPLACE', 'torch.bfloat16' if args.dtype=='bf16' else 'torch.float32')
+    with open('inference.py', 'w') as f:
+        f.write(data)
+
     shutil.copyfile('inference.py', os.path.join(code_path, 'inference.py'))
     shutil.copyfile('wrapper.py', os.path.join(code_path, 'wrapper.py'))
     shutil.copyfile('requirements.txt', os.path.join(code_path, 'requirements.txt'))
