@@ -17,6 +17,9 @@ from diffusers import StableDiffusionPipeline, DPMSolverMultistepScheduler
 
 model_id = "stabilityai/stable-diffusion-2-1-base"
 dtype = DTYPE_REPLACE
+# If you need lower latency, change it to 25. 
+# But the quality of the predictions will not be the same.
+num_inference_steps=50
 
 def model_fn(model_dir, context=None):
     global model_id, dtype
@@ -50,7 +53,8 @@ def input_fn(request_body, request_content_type, context=None):
     return request_body.decode('utf-8')
 
 def predict_fn(input_text, model, context=None):
-    return model(input_text).images[0]
+    global num_inference_steps
+    return model(input_text, num_inference_steps=num_inference_steps).images[0]    
 
 def output_fn(image, accept, context=None):
     if accept!='image/jpeg':
