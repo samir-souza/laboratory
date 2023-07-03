@@ -1,0 +1,166 @@
+diff --git a/enformer_pytorch/modeling_enformer.py b/enformer_pytorch/modeling_enformer.py
+index 8420873..132a19a 100644
+--- a/enformer_pytorch/modeling_enformer.py
++++ b/enformer_pytorch/modeling_enformer.py
+@@ -59,12 +59,13 @@ def get_positional_features_exponential(positions, features, seq_len, min_half_l
+     return torch.exp(-math.log(2.) / half_life * positions)
+ 
+ def get_positional_features_central_mask(positions, features, seq_len):
++    if type(features) == torch.Tensor: features = features.item()
+     center_widths = 2 ** torch.arange(1, features + 1, device = positions.device).float()
+     center_widths = center_widths - 1
+     return (center_widths[None, ...] > positions.abs()[..., None]).float()
+ 
+ def gamma_pdf(x, concentration, rate):
+-    log_unnormalized_prob = torch.xlogy(concentration - 1., x) - rate * x
++    log_unnormalized_prob = torch.xlogy(concentration - torch.FloatTensor([1.]), x) - rate * x
+     log_normalization = (torch.lgamma(concentration) - concentration * torch.log(rate))
+     return torch.exp(log_unnormalized_prob - log_normalization)
+ 
+@@ -77,14 +78,16 @@ def get_positional_features_gamma(positions, features, seq_len, stddev = None, s
+ 
+     mean = torch.linspace(start_mean, seq_len, features, device = positions.device)
+     mean = mean[None, ...]
++    stddev = torch.FloatTensor([stddev])
+     concentration = (mean / stddev) ** 2
+     rate = mean / stddev ** 2
+     probabilities = gamma_pdf(positions.float().abs()[..., None], concentration, rate)
+-    probabilities = probabilities + eps
++    probabilities = probabilities + torch.FloatTensor([eps])
+     outputs = probabilities / torch.amax(probabilities, dim = -1, keepdim = True)
+     return outputs
+ 
+ def get_positional_embed(seq_len, feature_size, device):
++    if type(seq_len) == torch.Tensor: seq_len = seq_len.item()
+     distances = torch.arange(-seq_len + 1, seq_len, device = device)
+ 
+     feature_functions = [
+@@ -112,6 +115,7 @@ def relative_shift(x):
+     to_pad = torch.zeros_like(x[..., :1])
+     x = torch.cat((to_pad, x), dim = -1)
+     _, h, t1, t2 = x.shape
++    if type(t2) == torch.Tensor: t2 = t2.item()
+     x = x.reshape(-1, h, t2, t1)
+     x = x[:, :, 1:, :]
+     x = x.reshape(-1, h, t1, t2 - 1)
+@@ -129,13 +133,12 @@ class Residual(nn.Module):
+ 
+ class GELU(nn.Module):
+     def forward(self, x):
+-        return torch.sigmoid(1.702 * x) * x
++        return torch.sigmoid(torch.Tensor([1.702]) * x) * x
+ 
+ class AttentionPool(nn.Module):
+     def __init__(self, dim, pool_size = 2):
+         super().__init__()
+         self.pool_size = pool_size
+-        self.pool_fn = Rearrange('b d (n p) -> b d n p', p = pool_size)
+ 
+         self.to_attn_logits = nn.Conv2d(dim, dim, 1, bias = False)
+ 
+@@ -153,13 +156,15 @@ class AttentionPool(nn.Module):
+             x = F.pad(x, (0, remainder), value = 0)
+             mask = torch.zeros((b, 1, n), dtype = torch.bool, device = x.device)
+             mask = F.pad(mask, (0, remainder), value = True)
+-
+-        x = self.pool_fn(x)
++
++        c1,c2 = x.shape[0:2]
++        x = x.reshape(c1,c2,-1,self.pool_size)
+         logits = self.to_attn_logits(x)
+ 
+         if needs_padding:
+             mask_value = -torch.finfo(logits.dtype).max
+-            logits = logits.masked_fill(self.pool_fn(mask), mask_value)
++            c1,c2 = mask_value.shape[0:2]
++            logits = logits.masked_fill(mask.reshape(c1,c2,-1,self.pool_size), mask_value)
+ 
+         attn = logits.softmax(dim = -1)
+ 
+@@ -172,6 +177,8 @@ class TargetLengthCrop(nn.Module):
+ 
+     def forward(self, x):
+         seq_len, target_len = x.shape[-2], self.target_length
++        if type(seq_len) == torch.Tensor: seq_len = seq_len.item()
++        if type(target_len) == torch.Tensor: target_len = target_len.item()
+ 
+         if target_len == -1:
+             return x
+@@ -195,6 +202,15 @@ def ConvBlock(dim, dim_out = None, kernel_size = 1):
+ 
+ # attention classes
+ 
++class Transpose(nn.Module):
++    def __init__(self, axis1, axis2):
++        super().__init__()
++        self.axis1 = axis1
++        self.axis2 = axis2
++
++    def forward(self, x):
++        return x.transpose(self.axis1,self.axis2)
++
+ class Attention(nn.Module):
+     def __init__(
+         self,
+@@ -338,9 +354,11 @@ class Enformer(PreTrainedModel):
+         # final pointwise
+ 
+         self.final_pointwise = nn.Sequential(
+-            Rearrange('b n d -> b d n'),
++            #Rearrange('b n d -> b d n'),
++            Transpose(2,1),
+             ConvBlock(filter_list[-1], twice_dim, 1),
+-            Rearrange('b d n -> b n d'),
++            #Rearrange('b d n -> b n d'),
++            Transpose(2,1),
+             nn.Dropout(config.dropout_rate / 8),
+             GELU()
+         )
+@@ -348,10 +366,12 @@ class Enformer(PreTrainedModel):
+         # create trunk sequential module
+ 
+         self._trunk = nn.Sequential(
+-            Rearrange('b n d -> b d n'),
++            #Rearrange('b n d -> b d n'),
++            Transpose(2,1),
+             self.stem,
+             self.conv_tower,
+-            Rearrange('b d n -> b n d'),
++            #Rearrange('b d n -> b n d'),
++            Transpose(2,1),
+             self.transformer,
+             self.crop_final,
+             self.final_pointwise
+@@ -386,10 +406,12 @@ class Enformer(PreTrainedModel):
+         return self._heads
+ 
+     def trunk_checkpointed(self, x):
+-        x = rearrange(x, 'b n d -> b d n')
++        #x = rearrange(x, 'b n d -> b d n')
++        x = x.transpose(2,1)
+         x = self.stem(x)
+         x = self.conv_tower(x)
+-        x = rearrange(x, 'b d n -> b n d')
++        x = x.transpose(2,1)
++        #x = rearrange(x, 'b d n -> b n d')
+         x = checkpoint_sequential(self.transformer, len(self.transformer), x)
+         x = self.crop_final(x)
+         x = self.final_pointwise(x)
+@@ -414,7 +436,7 @@ class Enformer(PreTrainedModel):
+         no_batch = x.ndim == 2
+ 
+         if no_batch:
+-            x = rearrange(x, '... -> () ...')
++            x = x.unsqueeze(0)#rearrange(x, '... -> () ...')
+ 
+         if exists(target_length):
+             self.set_target_length(target_length)
+@@ -423,7 +445,7 @@ class Enformer(PreTrainedModel):
+         x = trunk_fn(x)
+ 
+         if no_batch:
+-            x = rearrange(x, '() ... -> ...')
++            x = x.squeeze(0)#rearrange(x, '() ... -> ...')
+ 
+         if return_only_embeddings:
+             return x
